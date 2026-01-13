@@ -4,8 +4,13 @@
 
     <div class="search-section card">
       <div class="flex-row">
-        <input v-model="tuKhoa" @keyup.enter="timKiem" placeholder="Nhập tên hoặc mã sinh viên" class="input-main" />
-        <select v-model="locTrangThai" @change="taiDuLieu" class="select-main">
+        <input 
+          v-model="tuKhoa" 
+          @input="handleDebounceSearch" 
+          placeholder="Nhập tên hoặc mã sinh viên" 
+          class="input-main" 
+        />
+        <select v-model="locTrangThai" @change="taiDuLieu(0)" class="select-main">
           <option value="">Tất cả trạng thái</option>
           <option value="ACTIVE">Hoạt động (ACTIVE)</option>
           <option value="INACTIVE">Nghỉ (INACTIVE)</option>
@@ -20,11 +25,13 @@
         <button @click="moModal()" class="btn-success">+ Thêm Sinh Viên</button>
       </div>
 
-      <table>
+      <div v-if="isLoading" class="loading-overlay">Đang tải dữ liệu...</div>
+
+      <table v-else>
         <thead>
           <tr>
             <th>ID</th>
-            <th>Mã Sinh Viên</th>
+            <th>Mã SV</th>
             <th>Họ và Tên</th>
             <th>Năm Sinh</th>
             <th>Trạng Thái</th>
@@ -32,37 +39,49 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="sv in list" :key="sv.id" :class="{ 'row-inactive': sv.status === 'INACTIVE' }">
-            <td>{{ sv.id }}</td>
-            <td><b>{{ sv.maSV }}</b></td>
-            <td>{{ sv.tenSV }}</td>
-            <td>{{ sv.ngaySinh }}</td>
+          <tr v-for="student in studentList" :key="student.id" :class="{ 'row-inactive': student.status === 'INACTIVE' }">
+            <td>{{ student.id }}</td>
+            <td><b>{{ student.maSV }}</b></td>
+            <td>{{ student.tenSV }}</td>
+            <td>{{ student.ngaySinh }}</td>
             <td>
-              <span :class="['badge', sv.status]" @click="doiTrangThai(sv)">
-                {{ sv.status }}
+              <span :class="['badge', student.status]" @click="doiTrangThai(student)">
+                {{ student.status }}
               </span>
             </td>
             <td>
-              <button class="btn-link yellow" @click="moModal(sv)">Sửa</button>
-              <button class="btn-link red" @click="xoa(sv.id)">Xóa</button>
+              <button class="btn-yellow" @click="moModal(student)">Sửa</button>
+              <button class="btn-red" @click="xoa(student.id)">Xóa</button>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-if="!list.length" class="no-data">Không tìm thấy dữ liệu.</div>
+
+      <div class="pagination" v-if="totalPages > 1">
+        <button :disabled="currentPage === 0" @click="taiDuLieu(currentPage - 1)" class="btn-page">Trước</button>
+        <button v-for="p in totalPages" :key="p" @click="taiDuLieu(p - 1)"
+          :class="['btn-page', { active: currentPage === p - 1 }]">
+          {{ p }}
+        </button>
+        <button :disabled="currentPage >= totalPages - 1" @click="taiDuLieu(currentPage + 1)" class="btn-page">Sau</button>
+        
+        <button @click="nutBamSapXep" class="btn-sort">
+          {{ huongSort === 'asc' ? 'Tên: A-Z ↑' : 'Tên: Z-A ↓' }}
+        </button>
+      </div>
     </div>
 
     <div v-if="hienModal" class="overlay">
       <div class="modal-box">
-        <h3>{{ form.id ? 'Cập Nhật Hồ Sơ' : 'Thêm Sinh Viên Mới' }}</h3>
-        <input v-model="form.maSV" placeholder="Mã SV" :disabled="form.id" class="input-box" />
-        <input v-model="form.tenSV" placeholder="Họ và tên" class="input-box" />
-        <input v-model="form.ngaySinh" type="number" placeholder="Năm sinh" class="input-box" />
-        <input v-model="form.email" placeholder="Email" class="input-box" />
+        <h3>{{ studentForm.id ? 'Cập Nhật Hồ Sơ' : 'Thêm Sinh Viên Mới' }}</h3>
+        <input v-model="studentForm.maSV" placeholder="Mã SV" :disabled="studentForm.id" class="input-box" />
+        <input v-model="studentForm.tenSV" placeholder="Họ và tên" class="input-box" />
+        <input v-model="studentForm.ngaySinh" type="number" placeholder="Năm sinh" class="input-box" />
+        <input v-model="studentForm.email" placeholder="Email" class="input-box" />
 
         <div class="modal-btns">
           <button @click="hienModal = false" class="btn-cancel">Hủy</button>
-          <button @click="luu" class="btn-save">Lưu thông tin</button>
+          <button @click="luu" class="btn-save" :disabled="isLoading">Lưu thông tin</button>
         </div>
       </div>
     </div>
@@ -70,61 +89,111 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import axios from 'axios'
+import { ref, onMounted } from 'vue';
+import { studentApi } from '@/api/studentApi';
+import { debounce } from '@/utils/helpers';
 
-const list = ref([]), tuKhoa = ref(''), locTrangThai = ref(''), hienModal = ref(false)
-const host = "http://localhost:8080/api/students"
+const studentList = ref([]);
+const studentForm = ref({ id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' });
+const tuKhoa = ref('');
+const locTrangThai = ref('');
+const hienModal = ref(false);
+const currentPage = ref(0);
+const totalPages = ref(0);
+const pageSize = ref(5);
+const huongSort = ref('asc');
+const isLoading = ref(false);
 
-const form = ref({ id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' })
+const handleDebounceSearch = debounce(() => {
+  if (!tuKhoa.value.trim()) taiDuLieu(0);
+  else timKiem();
+}, 500);
 
-const taiDuLieu = async () => {
-  const url = locTrangThai.value ? `${host}/status/${locTrangThai.value}` : host
-  const res = await axios.get(url); list.value = res.data
-}
+const taiDuLieu = async (p = 0) => {
+  isLoading.value = true;
+  try {
+    const data = await studentApi.getPaging({
+      page: p,
+      size: pageSize.value,
+      status: locTrangThai.value || null,
+      sort: huongSort.value
+    });
+
+    studentList.value = data.content;
+    totalPages.value = data.totalPages;
+    currentPage.value = p;
+  } finally {
+    isLoading.value = false;
+  }
+};
 
 const timKiem = async () => {
-  const res = await axios.get(`${host}/search?keyword=${tuKhoa.value}`)
-  list.value = Array.isArray(res.data) ? res.data : []
-
-  setTimeout(() => {
-    tuKhoa.value = ''
-    taiDuLieu()
-  }, 3000)
-}
-
-const doiTrangThai = async (sv) => {
-  const newSt = sv.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
-  await axios.patch(`${host}/${sv.id}/status?status=${newSt}`)
-  taiDuLieu()
-}
+  isLoading.value = true;
+  try {
+    const data = await studentApi.search(tuKhoa.value);
+    studentList.value = data;
+    totalPages.value = 0; 
+  } finally {
+    isLoading.value = false;
+  }
+};
 
 const luu = async () => {
+  isLoading.value = true;
   try {
-    form.value.id ? await axios.put(`${host}/${form.value.id}`, form.value) : await axios.post(host, form.value)
-    hienModal.value = false; taiDuLieu()
-  } catch (err) {
-    alert("Lỗi: Kiểm tra lại mã SV hoặc dữ liệu trống!")
+    if (studentForm.value.id) {
+      await studentApi.update(studentForm.value.id, studentForm.value);
+    } else {
+      await studentApi.create(studentForm.value);
+    }
+    hienModal.value = false;
+    taiDuLieu(currentPage.value);
+  } finally {
+    isLoading.value = false;
   }
-}
+};
+
+const doiTrangThai = async (student) => {
+  const newSt = student.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  await studentApi.changeStatus(student.id, newSt);
+  taiDuLieu(currentPage.value);
+};
 
 const xoa = async (id) => {
-  if (confirm("Xác nhận xóa sinh viên này?")) {
-    await axios.delete(`${host}/${id}`);
-    taiDuLieu()
-  }
-}
+  if (!confirm("Xác nhận xóa sinh viên này?")) return;
+  await studentApi.delete(id);
+  taiDuLieu(0);
+};
 
-const moModal = (sv = null) => {
+const nutBamSapXep = () => {
+  huongSort.value = huongSort.value === 'asc' ? 'desc' : 'asc';
+  taiDuLieu(0);
+};
 
-  form.value = sv ? { ...sv } : { id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' }
-  hienModal.value = true
-}
+const moModal = (data = null) => {
+  studentForm.value = data ? { ...data } : { id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' };
+  hienModal.value = true;
+};
 
-onMounted(taiDuLieu)
+onMounted(() => taiDuLieu(0));
 </script>
 
 <style scoped>
+.btn-sort {
+  margin-left: 10px;
+  padding: 5px 15px;
+  background: #f39c12;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.btn-sort:hover {
+  background: #e67e22;
+}
+
 .demo-container {
   max-width: 900px;
   margin: auto;
@@ -179,6 +248,24 @@ onMounted(taiDuLieu)
   cursor: pointer;
 }
 
+.btn-yellow {
+  background: #aeae27;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.btn-red {
+  background: #ae4427;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -195,11 +282,6 @@ th {
 td {
   padding: 12px;
   border-bottom: 1px solid #eee;
-}
-
-.row-inactive {
-  background: #f9f9f9;
-  color: #bdc3c7;
 }
 
 .badge {
@@ -220,29 +302,26 @@ td {
   color: #c62828;
 }
 
-.btn-link.yellow {
-  background: none;
-  border: none;
-  color: #f1c40f;
-  cursor: pointer;
-  font-weight: bold;
-  margin-right: 10px;
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 20px;
+  align-items: center;
 }
 
-.btn-link.red {
-  background: none;
-  border: none;
-  color: #e74c3c;
-  cursor: pointer;
-}
-
-.input-box {
-  width: 100%;
-  padding: 10px;
-  margin-bottom: 10px;
+.btn-page {
+  padding: 5px 10px;
   border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
   border-radius: 4px;
-  box-sizing: border-box;
+}
+
+.btn-page.active {
+  background: #3498db;
+  color: white;
+  border-color: #3498db;
 }
 
 .overlay {
@@ -263,14 +342,21 @@ td {
   padding: 25px;
   border-radius: 8px;
   width: 400px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.input-box {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-sizing: border-box;
 }
 
 .modal-btns {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 15px;
 }
 
 .btn-save {
@@ -289,5 +375,11 @@ td {
   padding: 8px 15px;
   border-radius: 4px;
   cursor: pointer;
+}
+.loading-overlay {
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+  color: #3498db;
 }
 </style>
