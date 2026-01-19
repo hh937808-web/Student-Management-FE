@@ -10,12 +10,13 @@
           placeholder="Nhập tên hoặc mã sinh viên" 
           class="input-main" 
         />
+        <button @click="timKiem" class="btn-primary">Tìm kiếm</button>
+
         <select v-model="locTrangThai" @change="taiDuLieu(0)" class="select-main">
           <option value="">Tất cả trạng thái</option>
           <option value="ACTIVE">Hoạt động (ACTIVE)</option>
           <option value="INACTIVE">Nghỉ (INACTIVE)</option>
         </select>
-        <button @click="timKiem" class="btn-primary">Tìm kiếm</button>
       </div>
     </div>
 
@@ -34,6 +35,7 @@
             <th>Mã SV</th>
             <th>Họ và Tên</th>
             <th>Năm Sinh</th>
+            <th>Email</th>
             <th>Trạng Thái</th>
             <th>Thao tác</th>
           </tr>
@@ -44,6 +46,7 @@
             <td><b>{{ student.maSV }}</b></td>
             <td>{{ student.tenSV }}</td>
             <td>{{ student.ngaySinh }}</td>
+            <td>{{ student.email }}</td>
             <td>
               <span :class="['badge', student.status]" @click="doiTrangThai(student)">
                 {{ student.status }}
@@ -58,12 +61,12 @@
       </table>
 
       <div class="pagination" v-if="totalPages > 1">
-        <button :disabled="currentPage === 0" @click="taiDuLieu(currentPage - 1)" class="btn-page">Trước</button>
-        <button v-for="p in totalPages" :key="p" @click="taiDuLieu(p - 1)"
-          :class="['btn-page', { active: currentPage === p - 1 }]">
+        <button :disabled="currentPage === 1" @click="taiDuLieu(currentPage - 1)" class="btn-page">Trước</button>
+        <button v-for="p in totalPages" :key="p" @click="taiDuLieu(p)"
+          :class="['btn-page', { active: currentPage === p }]">
           {{ p }}
         </button>
-        <button :disabled="currentPage >= totalPages - 1" @click="taiDuLieu(currentPage + 1)" class="btn-page">Sau</button>
+        <button :disabled="currentPage >= totalPages" @click="taiDuLieu(currentPage + 1)" class="btn-page">Sau</button>
         
         <button @click="nutBamSapXep" class="btn-sort">
           {{ huongSort === 'asc' ? 'Tên: A-Z ↑' : 'Tên: Z-A ↓' }}
@@ -90,79 +93,74 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import { studentApi } from '@/api/studentApi';
+import { useStudents } from '@/composables/useStudents';
 import { debounce } from '@/utils/helpers';
 
-const studentList = ref([]);
-const studentForm = ref({ id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' });
+const {
+  list: studentList,
+  isLoading,
+  totalPages,
+  currentPage,
+  fetchPaging,
+  search,
+  save,
+  remove,
+  toggleStatus
+} = useStudents();
+
+
+const hienModal = ref(false);
 const tuKhoa = ref('');
 const locTrangThai = ref('');
-const hienModal = ref(false);
-const currentPage = ref(0);
-const totalPages = ref(0);
 const pageSize = ref(5);
 const huongSort = ref('asc');
-const isLoading = ref(false);
+const studentForm = ref({
+  id: null,
+  maSV: '',
+  tenSV: '',
+  ngaySinh: null,
+  email: '',
+  status: 'ACTIVE'
+});
 
-const handleDebounceSearch = debounce(() => {
-  if (!tuKhoa.value.trim()) taiDuLieu(0);
-  else timKiem();
-}, 500);
-
-const taiDuLieu = async (p = 0) => {
-  isLoading.value = true;
-  try {
-    const data = await studentApi.getPaging({
-      page: p,
-      size: pageSize.value,
-      status: locTrangThai.value || null,
-      sort: huongSort.value
-    });
-
-    studentList.value = data.content;
-    totalPages.value = data.totalPages;
-    currentPage.value = p;
-  } finally {
-    isLoading.value = false;
-  }
+const taiDuLieu = (page = 1) => {
+  fetchPaging({
+    page,
+    size: pageSize.value,
+    status: locTrangThai.value || null,
+    sort: huongSort.value
+  });
 };
 
-const timKiem = async () => {
-  isLoading.value = true;
-  try {
-    const data = await studentApi.search(tuKhoa.value);
-    studentList.value = data;
-    totalPages.value = 0; 
-  } finally {
-    isLoading.value = false;
-  }
+const timKiem = () => {
+  if (!tuKhoa.value.trim()) return taiDuLieu(0);
+  search(tuKhoa.value);
+};
+
+const handleDebounceSearch = debounce(timKiem, 500);
+
+const moModal = (data = null) => {
+  studentForm.value = data
+    ? { ...data }
+    : { id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' };
+  hienModal.value = true;
 };
 
 const luu = async () => {
-  isLoading.value = true;
-  try {
-    if (studentForm.value.id) {
-      await studentApi.update(studentForm.value.id, studentForm.value);
-    } else {
-      await studentApi.create(studentForm.value);
-    }
-    hienModal.value = false;
-    taiDuLieu(currentPage.value);
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-const doiTrangThai = async (student) => {
-  const newSt = student.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-  await studentApi.changeStatus(student.id, newSt);
+  await save(studentForm.value);
+  hienModal.value = false;
   taiDuLieu(currentPage.value);
 };
 
 const xoa = async (id) => {
-  if (!confirm("Xác nhận xóa sinh viên này?")) return;
-  await studentApi.delete(id);
+  if (!confirm('Xác nhận xóa sinh viên này?')) return;
+  await remove(id);
   taiDuLieu(0);
+};
+
+const doiTrangThai = async (student) => {
+  await toggleStatus(student);
+  taiDuLieu(currentPage.value);
 };
 
 const nutBamSapXep = () => {
@@ -170,13 +168,9 @@ const nutBamSapXep = () => {
   taiDuLieu(0);
 };
 
-const moModal = (data = null) => {
-  studentForm.value = data ? { ...data } : { id: null, maSV: '', tenSV: '', ngaySinh: null, email: '', status: 'ACTIVE' };
-  hienModal.value = true;
-};
-
-onMounted(() => taiDuLieu(0));
+onMounted(() => taiDuLieu(1));
 </script>
+
 
 <style scoped>
 .btn-sort {
@@ -195,7 +189,7 @@ onMounted(() => taiDuLieu(0));
 }
 
 .demo-container {
-  max-width: 900px;
+  max-width: 1200px;
   margin: auto;
   padding: 20px;
   font-family: Arial, sans-serif;
@@ -253,7 +247,7 @@ onMounted(() => taiDuLieu(0));
   color: white;
   border: none;
   padding: 5px 10px;
-  border-radius: 3px;
+  border-radius: 10px;
   cursor: pointer;
 }
 
@@ -262,7 +256,7 @@ onMounted(() => taiDuLieu(0));
   color: white;
   border: none;
   padding: 5px 10px;
-  border-radius: 3px;
+  border-radius: 10px;
   cursor: pointer;
 }
 

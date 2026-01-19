@@ -1,10 +1,12 @@
 <script setup>
-import QLSV from './components/QLSV.vue';
-
+import StudentListView from './components/views/StudentListView.vue'
+import AppFooter from './components/layout/AppFooter.vue'
 </script>
 
 <template>
-  <QLSV></QLSV>
-</template>
+  <div class="app">
+    <StudentListView />
+    <AppFooter />
 
-<style scoped></style>
+  </div>
+</template>
