@@ -7,6 +7,5 @@ import AppFooter from './components/layout/AppFooter.vue'
   <div class="app">
     <StudentListView />
     <AppFooter />
-
   </div>
 </template>
