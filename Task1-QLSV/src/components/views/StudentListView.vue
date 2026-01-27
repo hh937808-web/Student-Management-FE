@@ -12,7 +12,7 @@
         />
         <button @click="timKiem" class="btn-primary">Tìm kiếm</button>
 
-        <select v-model="locTrangThai" @change="taiDuLieu(0)" class="select-main">
+        <select v-model="locTrangThai" @change="taiDuLieu(1)" class="select-main">
           <option value="">Tất cả trạng thái</option>
           <option value="ACTIVE">Hoạt động (ACTIVE)</option>
           <option value="INACTIVE">Nghỉ (INACTIVE)</option>
@@ -133,7 +133,7 @@ const taiDuLieu = (page = 1) => {
 };
 
 const timKiem = () => {
-  if (!tuKhoa.value.trim()) return taiDuLieu(0);
+  if (!tuKhoa.value.trim()) return taiDuLieu(1);
   search(tuKhoa.value);
 };
 
@@ -155,7 +155,7 @@ const luu = async () => {
 const xoa = async (id) => {
   if (!confirm('Xác nhận xóa sinh viên này?')) return;
   await remove(id);
-  taiDuLieu(0);
+  taiDuLieu(1);
 };
 
 const doiTrangThai = async (student) => {
@@ -165,7 +165,7 @@ const doiTrangThai = async (student) => {
 
 const nutBamSapXep = () => {
   huongSort.value = huongSort.value === 'asc' ? 'desc' : 'asc';
-  taiDuLieu(0);
+  taiDuLieu(1);
 };
 
 onMounted(() => taiDuLieu(1));
